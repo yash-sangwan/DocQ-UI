@@ -1,103 +1,191 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import type { Chat } from "@/types/chat";
+import { ChatInterface } from "@/components/chat-interface";
+import { Sidebar } from "@/components/sidebar";
+import {
+  getChats,
+  saveChat,
+  deleteChat,
+  getActiveChat,
+  setActiveChat,
+} from "@/lib/storage";
+import { generateId } from "@/lib/utils";
+import { Menu, X, HelpCircle } from "lucide-react";
+
+export default function App() {
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string>("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport on mount / resize
+  useEffect(() => {
+    const checkIfMobile = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setSidebarOpen(false);
+      }
+    };
+
+    checkIfMobile();
+    window.addEventListener("resize", checkIfMobile);
+    return () => window.removeEventListener("resize", checkIfMobile);
+  }, []);
+
+  // Load chats from storage
+  useEffect(() => {
+    const storedChats = getChats();
+    setChats(storedChats);
+
+    const storedActive = getActiveChat();
+    if (storedActive && storedChats.some((c) => c.id === storedActive)) {
+      setActiveChatId(storedActive);
+    } else if (storedChats.length) {
+      setActiveChatId(storedChats[0].id);
+      setActiveChat(storedChats[0].id);
+    }
+  }, []);
+
+  /* -------------------- chat CRUD helpers -------------------- */
+  const handleNewChat = () => {
+    const newChat: Chat = {
+      id: generateId(),
+      title: "New chat",
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const updated = [newChat, ...chats];
+    setChats(updated);
+    setActiveChatId(newChat.id);
+    saveChat(newChat);
+    setActiveChat(newChat.id);
+    if (isMobile) setSidebarOpen(false);
+  };
+
+  const handleSelectChat = (id: string) => {
+    setActiveChatId(id);
+    setActiveChat(id);
+    if (isMobile) setSidebarOpen(false);
+  };
+
+  const handleDeleteChat = (id: string) => {
+    const updated = chats.filter((c) => c.id !== id);
+    setChats(updated);
+    deleteChat(id);
+    if (activeChatId === id) {
+      if (updated.length) {
+        setActiveChatId(updated[0].id);
+        setActiveChat(updated[0].id);
+      } else {
+        setActiveChatId("");
+        setActiveChat("");
+      }
+    }
+  };
+
+  const handleUpdateChat = (chat: Chat) => {
+    const exists = chats.some((c) => c.id === chat.id);
+    const updated = exists
+      ? chats.map((c) => (c.id === chat.id ? chat : c))
+      : [chat, ...chats];
+    setChats(updated);
+    saveChat(chat);
+    if (!exists) {
+      setActiveChatId(chat.id);
+      setActiveChat(chat.id);
+    }
+  };
+
+  const activeChat =
+    chats.find((c) => c.id === activeChatId) ||
+    ({
+      id: "",
+      title: "",
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as Chat);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <main
+      className="flex h-screen overflow-hidden"
+      style={{ backgroundColor: "var(--bg-primary)" }}
+    >
+      {/* Sidebar container */}
+      <div
+        className={`h-full transition-all duration-300 ease-in-out z-40 ${
+          sidebarOpen ? "w-80" : "w-0"
+        } ${isMobile ? "fixed" : "relative"}`}
+      >
+        <div
+          className={`h-full w-80 ${
+            !sidebarOpen && "transform -translate-x-full"
+          } transition-transform duration-300 border-r`}
+          style={{ borderColor: "var(--border-primary)" }}
+        >
+          <Sidebar
+            chats={chats}
+            activeChat={activeChatId}
+            onSelectChat={handleSelectChat}
+            onNewChat={handleNewChat}
+            onDeleteChat={handleDeleteChat}
+            onCloseSidebar={() => setSidebarOpen(false)}
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      </div>
+
+      {/* Main panel */}
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Top navbar */}
+        <div
+          className="flex items-center justify-between p-4 border-b"
+          style={{
+            borderColor: "var(--border-primary)",
+            backgroundColor: "var(--bg-primary)",
+          }}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
+              style={{
+                backgroundColor: "var(--bg-tertiary)",
+                color: "var(--text-primary)",
+              }}
+              aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            >
+              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
+
+          <button
+            className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
+            style={{
+              backgroundColor: "var(--bg-tertiary)",
+              color: "var(--text-secondary)",
+            }}
+            aria-label="Help"
+          >
+            <HelpCircle size={20} />
+          </button>
+        </div>
+
+        {/* Chat area */}
+        <div className="flex-1 h-full overflow-hidden">
+          <ChatInterface chat={activeChat} onUpdateChat={handleUpdateChat} />
+        </div>
+      </div>
+
+      {sidebarOpen && isMobile && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-60 z-30 backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+    </main>
   );
 }
