@@ -1,0 +1,17 @@
+python-multipart 
+sentence-transformers 
+
+fastapi
+uvicorn[standard]
+
+python-dotenv
+rich
+
+llama-index-core
+llama-index-embeddings-huggingface
+llama-index-vector-stores-qdrant
+llama-index-llms-ollama
+
+qdrant-client
+sentence-transformers
+
