@@ -1,17 +1,18 @@
-"use client"
+"use client";
 
-import { ChatHistory } from "./chat-history"
-import type { Chat } from "@/types/chat"
-import { X } from "lucide-react"
-import Link from "next/link"
+import { ChatHistory } from "./chat-history";
+import type { Chat } from "@/types/chat";
+import { X } from "lucide-react";
+import Link from "next/link";
 
 interface SidebarProps {
-  chats: Chat[]
-  activeChat: string
-  onSelectChat: (chatId: string) => void
-  onNewChat: () => void
-  onDeleteChat: (chatId: string) => void
-  onCloseSidebar?: () => void
+  chats: Chat[];
+  activeChat: string;
+  onSelectChat: (chatId: string) => void;
+  onNewChat: () => void;
+  onDeleteChat: (chatId: string) => void;
+  onCloseSidebar?: () => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
@@ -21,6 +22,7 @@ export function Sidebar({
   onNewChat,
   onDeleteChat,
   onCloseSidebar,
+  onOpenSettings,
 }: SidebarProps) {
   return (
     <div
@@ -29,14 +31,13 @@ export function Sidebar({
     >
       <div className="p-3 pl-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2">
-        <img
-          src="/logo-bg-removed.png"
-          alt="DocQ"
-          width={45}
-          className="select-none"
+          <img
+            src="/logo-bg-removed.png"
+            alt="DocQ"
+            width={45}
+            className="select-none"
           />
-          </Link>
-
+        </Link>
         {onCloseSidebar && (
           <button
             onClick={onCloseSidebar}
@@ -55,7 +56,8 @@ export function Sidebar({
         onSelectChat={onSelectChat}
         onNewChat={onNewChat}
         onDeleteChat={onDeleteChat}
+        onOpenSettings={onOpenSettings}
       />
     </div>
-  )
+  );
 }

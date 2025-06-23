@@ -1,25 +1,32 @@
-import axios from "axios"
+import axios from "axios";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL
-
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 const api = axios.create({
   baseURL: BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: 30000,
-})
+  timeout: 60_000,
+});
 
-export async function askQuestion(query: string) {
-  try {
-    console.log("Sending query:", query)
-    const response = await api.post("/ask", { query })
+export async function uploadPdfs(
+  files: File[],
+): Promise<{ session_id: string }> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
 
-    return response
-  } catch (error) {
-    console.error("Error asking question:", error)
-     
-    throw error
-  }
+  const { data } = await api.post("/upload", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return data;
+}
+
+export async function askQuestion(
+  sid: string,
+  question: string,
+): Promise<{ content: string }> {
+  const { data } = await api.post<{ content: string }>(`/ask/${sid}`, {
+    question,
+  });
+  return data;
 }

@@ -2,19 +2,7 @@ import { useState } from "react";
 import { Edit3, Search, MessageSquare, Settings } from "lucide-react";
 import { SearchSheet } from "./search/search-sheet";
 import { ChatOptions } from "./chat-options/options-down";
-
-interface Chat {
-  id: string;
-  title: string;
-  messages: Array<{
-    id: string;
-    content: string;
-    role: "user" | "assistant";
-    timestamp: number;
-  }>;
-  createdAt: number;
-  updatedAt: number;
-}
+import { Chat } from "../types/chat";
 
 interface ChatHistoryProps {
   chats: Chat[];
@@ -22,6 +10,7 @@ interface ChatHistoryProps {
   onSelectChat: (chatId: string) => void;
   onNewChat: () => void;
   onDeleteChat: (chatId: string) => void;
+  onOpenSettings: () => void;
 }
 
 export function ChatHistory({
@@ -30,6 +19,7 @@ export function ChatHistory({
   onSelectChat,
   onNewChat,
   onDeleteChat,
+  onOpenSettings,
 }: ChatHistoryProps) {
   const [hoveredChat, setHoveredChat] = useState<string | null>(null);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
@@ -37,7 +27,6 @@ export function ChatHistory({
   const formatDate = (timestamp: number): string => {
     const now = Date.now();
     const diff = now - timestamp;
-
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
@@ -55,10 +44,7 @@ export function ChatHistory({
   };
 
   const handleNewChat = () => {
-    const currentChat = chats.find((chat) => chat.id === activeChat);
-    if (!currentChat || currentChat.messages.length > 0) {
-      onNewChat();
-    }
+    onNewChat();
   };
 
   return (
@@ -87,7 +73,6 @@ export function ChatHistory({
             <Edit3 size={16} />
             <span>New chat</span>
           </button>
-
           <button
             onClick={() => setSearchSheetOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200"
@@ -108,12 +93,10 @@ export function ChatHistory({
             <span>Search chats</span>
           </button>
         </div>
-
         <div
           className="mx-3 h-px"
           style={{ backgroundColor: "var(--border-primary)" }}
         />
-
         <div className="flex-1 overflow-y-auto p-3">
           <div className="flex items-center justify-between mb-3">
             <h3
@@ -123,7 +106,6 @@ export function ChatHistory({
               Chats
             </h3>
           </div>
-
           {chats.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 px-4">
               <MessageSquare
@@ -140,7 +122,7 @@ export function ChatHistory({
             </div>
           ) : (
             <div className="space-y-1">
-              {chats.map((chat) => (
+              {chats.map((chat: any) => (
                 <div
                   key={chat.id}
                   className="relative group"
@@ -163,18 +145,13 @@ export function ChatHistory({
                           : "var(--text-secondary)",
                     }}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0 pr-2">
-                        <div className="font-medium text-sm mb-1">
-                          {truncate(chat.title, 30)}
-                        </div>
-                        <div className="text-xs opacity-70">
-                          {formatDate(chat.updatedAt)}
-                        </div>
-                      </div>
+                    <div className="font-medium text-sm mb-1">
+                      {truncate(chat.title, 30)}
+                    </div>
+                    <div className="text-xs opacity-70">
+                      {formatDate(chat.updatedAt)}
                     </div>
                   </button>
-
                   {hoveredChat === chat.id && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 z-20">
                       <ChatOptions onDelete={() => onDeleteChat(chat.id)} />
@@ -185,12 +162,12 @@ export function ChatHistory({
             </div>
           )}
         </div>
-
         <div
           className="p-3 border-t"
           style={{ borderColor: "var(--border-primary)" }}
         >
           <button
+            onClick={onOpenSettings}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200"
             style={{
               color: "var(--text-secondary)",
@@ -210,7 +187,6 @@ export function ChatHistory({
           </button>
         </div>
       </div>
-
       <SearchSheet
         chats={chats}
         isOpen={searchSheetOpen}

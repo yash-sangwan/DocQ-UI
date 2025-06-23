@@ -11,10 +11,15 @@ import EmptyStateChat from "./empty-state-chat";
 
 interface ChatInterfaceProps {
   chat: Chat;
+  sessionId: string | null;
   onUpdateChat: (chat: Chat) => void;
 }
 
-export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
+export function ChatInterface({
+  chat,
+  sessionId,
+  onUpdateChat,
+}: ChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -27,7 +32,13 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
   }, [chat.messages]);
 
   const handleSendMessage = async (content: string) => {
-    // Create user message
+    if (!sessionId) {
+      alert(
+        "Session not ready. Please upload documents through the settings panel first.",
+      );
+      return;
+    }
+
     const userMessage: Message = {
       id: generateId(),
       content,
@@ -38,7 +49,6 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
     let updatedChat: Chat;
 
     if (!chat.id) {
-      // Create a new chat since none exists
       updatedChat = {
         id: generateId(),
         title: content.length > 30 ? content.substring(0, 30) + "..." : content,
@@ -47,14 +57,11 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
         updatedAt: Date.now(),
       };
     } else {
-      // Update existing chat with user message
       updatedChat = {
         ...chat,
         messages: [...chat.messages, userMessage],
         updatedAt: Date.now(),
       };
-
-      // If this is the first message in an existing chat, set the title
       if (chat.messages.length === 0) {
         updatedChat.title =
           content.length > 30 ? content.substring(0, 30) + "..." : content;
@@ -62,23 +69,20 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
     }
 
     onUpdateChat(updatedChat);
-
-    // Get response from API
     setIsLoading(true);
-    try {
-      const response = await askQuestion(content);
 
-      // Create assistant message
+    try {
+      const response = await askQuestion(sessionId, content);
+
       const assistantMessage: Message = {
         id: generateId(),
         content:
-          response.data.content ||
+          response.content ||
           "I apologize, but I couldn't generate a response at this time. Please try again.",
         role: "assistant",
         timestamp: Date.now(),
       };
 
-      // Update chat with assistant message
       const finalChat: Chat = {
         ...updatedChat,
         messages: [...updatedChat.messages, assistantMessage],
@@ -87,7 +91,6 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
 
       onUpdateChat(finalChat);
     } catch (error) {
-      // Create error message
       const errorMessage: Message = {
         id: generateId(),
         content:
@@ -96,19 +99,16 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
         timestamp: Date.now(),
       };
 
-      // Update chat with error message
       const finalChat: Chat = {
         ...updatedChat,
         messages: [...updatedChat.messages, errorMessage],
         updatedAt: Date.now(),
       };
-
       onUpdateChat(finalChat);
     } finally {
       setIsLoading(false);
     }
   };
-
 
   return (
     <div
@@ -117,13 +117,12 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
     >
       <div className="flex-1 overflow-y-auto">
         {chat.messages.length === 0 ? (
-          <EmptyStateChat/>
+          <EmptyStateChat />
         ) : (
           <div className="p-6">
             {chat.messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
-
             {isLoading && (
               <div className="flex justify-start mb-6 fade-in">
                 <div className="flex items-start gap-3">
@@ -153,7 +152,6 @@ export function ChatInterface({ chat, onUpdateChat }: ChatInterfaceProps) {
                 </div>
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
         )}

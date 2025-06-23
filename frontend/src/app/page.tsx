@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import type { Chat } from "@/types/chat";
 import { ChatInterface } from "@/components/chat-interface";
 import { Sidebar } from "@/components/sidebar";
+import { SettingsSheet } from "@/components/settings/settings-sheet";
 import {
   getChats,
   saveChat,
   deleteChat,
   getActiveChat,
   setActiveChat,
+  getSessionId,
+  setSessionId as storeSessionId,
 } from "@/lib/storage";
 import { generateId } from "@/lib/utils";
 import { Menu, X, HelpCircle } from "lucide-react";
@@ -19,8 +22,9 @@ export default function App() {
   const [activeChatId, setActiveChatId] = useState<string>("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Detect mobile viewport on mount / resize
   useEffect(() => {
     const checkIfMobile = () => {
       const mobile = window.innerWidth < 768;
@@ -35,7 +39,6 @@ export default function App() {
     return () => window.removeEventListener("resize", checkIfMobile);
   }, []);
 
-  // Load chats from storage
   useEffect(() => {
     const storedChats = getChats();
     setChats(storedChats);
@@ -47,9 +50,13 @@ export default function App() {
       setActiveChatId(storedChats[0].id);
       setActiveChat(storedChats[0].id);
     }
+
+    const storedSid = getSessionId();
+    if (storedSid) {
+      setSessionId(storedSid);
+    }
   }, []);
 
-  /* -------------------- chat CRUD helpers -------------------- */
   const handleNewChat = () => {
     const newChat: Chat = {
       id: generateId(),
@@ -100,6 +107,12 @@ export default function App() {
     }
   };
 
+  const handleSessionReady = (sid: string) => {
+    setSessionId(sid);
+    storeSessionId(sid);
+    setSettingsOpen(false);
+  };
+
   const activeChat =
     chats.find((c) => c.id === activeChatId) ||
     ({
@@ -111,81 +124,89 @@ export default function App() {
     } as Chat);
 
   return (
-    <main
-      className="flex h-screen overflow-hidden"
-      style={{ backgroundColor: "var(--bg-primary)" }}
-    >
-      {/* Sidebar container */}
-      <div
-        className={`h-full transition-all duration-300 ease-in-out z-40 ${
-          sidebarOpen ? "w-80" : "w-0"
-        } ${isMobile ? "fixed" : "relative"}`}
+    <>
+      <main
+        className="flex h-screen overflow-hidden"
+        style={{ backgroundColor: "var(--bg-primary)" }}
       >
         <div
-          className={`h-full w-80 ${
-            !sidebarOpen && "transform -translate-x-full"
-          } transition-transform duration-300 border-r`}
-          style={{ borderColor: "var(--border-primary)" }}
+          className={`h-full transition-all duration-300 ease-in-out z-40 ${
+            sidebarOpen ? "w-80" : "w-0"
+          } ${isMobile ? "fixed" : "relative"}`}
         >
-          <Sidebar
-            chats={chats}
-            activeChat={activeChatId}
-            onSelectChat={handleSelectChat}
-            onNewChat={handleNewChat}
-            onDeleteChat={handleDeleteChat}
-            onCloseSidebar={() => setSidebarOpen(false)}
-          />
+          <div
+            className={`h-full w-80 ${
+              !sidebarOpen && "transform -translate-x-full"
+            } transition-transform duration-300 border-r`}
+            style={{ borderColor: "var(--border-primary)" }}
+          >
+            <Sidebar
+              chats={chats}
+              activeChat={activeChatId}
+              onSelectChat={handleSelectChat}
+              onNewChat={handleNewChat}
+              onDeleteChat={handleDeleteChat}
+              onCloseSidebar={() => setSidebarOpen(false)}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Main panel */}
-      <div className="flex-1 flex flex-col h-full relative">
-        {/* Top navbar */}
-        <div
-          className="flex items-center justify-between p-4 border-b"
-          style={{
-            borderColor: "var(--border-primary)",
-            backgroundColor: "var(--bg-primary)",
-          }}
-        >
-          <div className="flex items-center gap-3">
+        <div className="flex-1 flex flex-col h-full relative">
+          <div
+            className="flex items-center justify-between p-4 border-b"
+            style={{
+              borderColor: "var(--border-primary)",
+              backgroundColor: "var(--bg-primary)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
+                style={{
+                  backgroundColor: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                }}
+                aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+              >
+                {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            </div>
+
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
               style={{
                 backgroundColor: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
+                color: "var(--text-secondary)",
               }}
-              aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+              aria-label="Help"
             >
-              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+              <HelpCircle size={20} />
             </button>
           </div>
 
-          <button
-            className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
-            style={{
-              backgroundColor: "var(--bg-tertiary)",
-              color: "var(--text-secondary)",
-            }}
-            aria-label="Help"
-          >
-            <HelpCircle size={20} />
-          </button>
+          <div className="flex-1 h-full overflow-hidden">
+            <ChatInterface
+              chat={activeChat}
+              sessionId={sessionId}
+              onUpdateChat={handleUpdateChat}
+            />
+          </div>
         </div>
 
-        {/* Chat area */}
-        <div className="flex-1 h-full overflow-hidden">
-          <ChatInterface chat={activeChat} onUpdateChat={handleUpdateChat} />
-        </div>
-      </div>
-
-      {sidebarOpen && isMobile && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-60 z-30 backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-    </main>
+        {sidebarOpen && isMobile && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-60 z-30 backdrop-blur-sm"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+      </main>
+      <SettingsSheet
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSessionReady={handleSessionReady}
+      />
+    </>
   );
 }
