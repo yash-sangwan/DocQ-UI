@@ -18,3 +18,8 @@ pip uninstall torch torchvision torchaudio torchtext -y
 # Install PyTorch with CUDA 12.8 support
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
+
+### Run the main script
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
