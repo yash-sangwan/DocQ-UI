@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import type { Chat } from "@/types/chat";
 import { ChatInterface } from "@/components/chat-interface";
 import { Sidebar } from "@/components/sidebar";
-import { SettingsSheet } from "@/components/settings/settings-sheet";
 import { HelpSheet } from "@/components/help/help-sheet"; 
 import {
   getChats,
@@ -17,6 +16,7 @@ import {
 } from "@/lib/storage";
 import { generateId } from "@/lib/utils";
 import { Menu, X, HelpCircle } from "lucide-react";
+import SettingsSheet from "@/components/settings/settings-sheet";
 
 export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
