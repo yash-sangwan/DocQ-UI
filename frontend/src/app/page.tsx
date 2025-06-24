@@ -5,6 +5,7 @@ import type { Chat } from "@/types/chat";
 import { ChatInterface } from "@/components/chat-interface";
 import { Sidebar } from "@/components/sidebar";
 import { SettingsSheet } from "@/components/settings/settings-sheet";
+import { HelpSheet } from "@/components/help/help-sheet"; 
 import {
   getChats,
   saveChat,
@@ -24,6 +25,7 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false); 
 
   useEffect(() => {
     const checkIfMobile = () => {
@@ -175,6 +177,7 @@ export default function App() {
             </div>
 
             <button
+              onClick={() => setHelpOpen(true)} 
               className="p-2 rounded-lg transition-all duration-200 hover:scale-110 focus:scale-110"
               style={{
                 backgroundColor: "var(--bg-tertiary)",
@@ -207,6 +210,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         onSessionReady={handleSessionReady}
       />
+      <HelpSheet isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </>
   );
 }
