@@ -1,100 +1,266 @@
-import os, uuid
-from pathlib import Path
-from typing import Dict, Any
+from __future__ import annotations
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, HTTPException, Body
+import os
+import time
+import uuid
+import tempfile
+import logging
+from contextlib import asynccontextmanager
+from typing import List, Dict, Any
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from rich.console import Console
+from pydantic import BaseModel
 
-from llama_index.core import Settings, VectorStoreIndex, SimpleDirectoryReader, PromptTemplate
+from llama_index.core import (
+    Settings,
+    StorageContext,
+    VectorStoreIndex,
+    SimpleDirectoryReader,
+)
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.prompts import PromptTemplate
 from llama_index.llms.ollama import Ollama
 
-console = Console()
-load_dotenv(".env")
+import qdrant_client
+from qdrant_client.http import models as rest
+from dotenv import load_dotenv
 
-llm = Ollama(base_url=os.getenv("OLLAMA_URL"), model=os.getenv("OLLAMA_MODEL", "llama3.1:8b"), request_timeout=60)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger("rag-server")
 
-try:
-    embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-large-en")
-    embed_model.embed_query("ping")
-except Exception as e:
-    console.print(f"[yellow]GPU embeddings failed ({e}) – using CPU[/]")
-    embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-base-en-v1.5", device="cpu")
+# Globals
+sessions: Dict[str, Dict[str, Any]] = {}
+embed_model: HuggingFaceEmbedding | None = None
+llm: Ollama | None = None
+qdrant_client_instance: qdrant_client.QdrantClient | None = None
 
-Settings.llm = llm
-Settings.embed_model = embed_model
+# Pydantic models
+class QuestionRequest(BaseModel):
+    question: str
+    custom_prompt: str | None = None
 
-UPLOADS_DIR = Path("uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
 
-QA_PROMPT = PromptTemplate(
-    template=(
-        "You are an academic advisor for the IIT-Madras BS programme.\n"
-        "Quote numbers exactly as shown in the context.\n\n"
-        "<context>\n{context_str}\n</context>\n\n"
-        "Q: {query_str}\nA:"
+class UploadRequest(BaseModel):
+    custom_prompt: str | None = None
+
+
+class UploadResponse(BaseModel):
+    session_id: str
+    message: str
+
+
+class QuestionResponse(BaseModel):
+    content: str
+
+
+# Startup helpers
+async def initialize_models() -> None:
+    """Load Ollama, embeddings (CPU) and connect to Qdrant."""
+    global embed_model, llm, qdrant_client_instance
+
+    load_dotenv()
+
+    # LLM
+    llm = Ollama(
+        base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        model="llama3.1:8b",
+        request_timeout=60.0,
     )
+
+    # Embeddings – forced to CPU
+    try:
+        embed_model = HuggingFaceEmbedding(
+            model_name="BAAI/bge-large-en", device="cpu"
+        )
+    except RuntimeError:
+        embed_model = HuggingFaceEmbedding(
+            model_name="BAAI/bge-base-en-v1.5", device="cpu"
+        )
+
+    Settings.llm = llm
+    Settings.embed_model = embed_model
+
+    # Qdrant
+    qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api = os.getenv("QDRANT_API", "")
+
+    if not qdrant_url:
+        raise ValueError("QDRANT_URL not set")
+
+    qdrant_client_instance = qdrant_client.QdrantClient(
+        url=qdrant_url,
+        api_key=qdrant_api or None,
+        https=True,
+        port=443,
+        prefer_grpc=False,
+        timeout=60.0,
+    )
+    qdrant_client_instance.get_collections()
+    logger.info("Connected to Qdrant")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initialising models")
+    await initialize_models()
+    logger.info("Server ready")
+    yield
+    logger.info("Shutdown complete")
+
+# FastAPI app
+app = FastAPI(title="RAG Document Assistant", version="1.0.0", lifespan=lifespan)
+
+origins_cfg = [o.strip() for o in os.getenv("ALLOWED_ORIGIN", "*").split(",")]
+wildcard = origins_cfg == ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if wildcard else origins_cfg,
+    allow_credentials=not wildcard,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-SESSIONS: Dict[str, RetrieverQueryEngine] = {}
+# Internal helpers
+def _create_collection(name: str) -> None:
+    """Create Qdrant collection if it does not exist."""
+    assert qdrant_client_instance and embed_model
+    current = {c.name for c in qdrant_client_instance.get_collections().collections}
+    if name in current:
+        return
 
-app = FastAPI(title="Multi-PDF RAG Demo")
+    dim = len(embed_model.get_query_embedding("dimension-check"))
+    qdrant_client_instance.create_collection(
+        collection_name=name,
+        vectors_config=rest.VectorParams(size=dim, distance=rest.Distance.COSINE),
+        optimizers_config=rest.OptimizersConfigDiff(memmap_threshold=20_000),
+    )
+    logger.info("Created collection %s", name)
 
-if origin := os.getenv("ALLOWED_ORIGIN"):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[origin],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+
+def _build_index(files_data: List[bytes], session_id: str) -> VectorStoreIndex:
+    """Embed and index PDFs into Qdrant."""
+    assert qdrant_client_instance
+    tmp_dir = tempfile.mkdtemp(prefix=f"session_{session_id}_")
+    try:
+        # Save files
+        for idx, data in enumerate(files_data):
+            with open(os.path.join(tmp_dir, f"doc_{idx}.pdf"), "wb") as fp:
+                fp.write(data)
+
+        # Load and split
+        docs = SimpleDirectoryReader(tmp_dir, required_exts=[".pdf"]).load_data()
+        splitter = SentenceSplitter(chunk_size=150, chunk_overlap=40)
+        nodes = splitter.get_nodes_from_documents(docs)
+
+        # Vector store
+        coll = f"session_{session_id}"
+        _create_collection(coll)
+        store = QdrantVectorStore(client=qdrant_client_instance, collection_name=coll)
+        ctx = StorageContext.from_defaults(vector_store=store)
+        return VectorStoreIndex(nodes, storage_context=ctx)
+    finally:
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _make_engine(index: VectorStoreIndex, custom_prompt: str | None) -> RetrieverQueryEngine:
+    """Return a RetrieverQueryEngine with reranking."""
+    retriever = VectorIndexRetriever(index=index, similarity_top_k=30)
+
+    model_name = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    try:
+        reranker = SentenceTransformerRerank(top_n=12, model=model_name)
+    except TypeError:
+        reranker = SentenceTransformerRerank(model_name, 8)
+
+    prompt = custom_prompt or (
+        "You are a helpful assistant. Rely **only** on the information supplied in <context>. "
+        "Answer clearly and copy any figures or exact wording exactly as they appear in the source.\n\n"
+        "If the context does not contain the requested fact or number, reply 'Not specified in the document'.\n\n"
     )
 
-def build_engine(pdf_dir: Path) -> RetrieverQueryEngine:
-    docs = SimpleDirectoryReader(str(pdf_dir), required_exts=[".pdf"]).load_data()
-    if not docs:
-        raise ValueError("No PDFs found")
-    nodes = SentenceSplitter(chunk_size=150, chunk_overlap=40).get_nodes_from_documents(docs)
-    index = VectorStoreIndex(nodes)
-    retriever = VectorIndexRetriever(index=index, similarity_top_k=30)
-    reranker = SentenceTransformerRerank(model="cross-encoder/ms-marco-MiniLM-L-12-v2", top_n=12)
-    return RetrieverQueryEngine.from_args(retriever=retriever, node_postprocessors=[reranker], response_mode="compact", text_qa_template=QA_PROMPT, llm=llm)
+    template = PromptTemplate(
+        template=f"{prompt}\n\n<context>\n{{context_str}}\n</context>\n\nQ: {{query_str}}\nA:"
+    )
 
-@app.post("/upload")
-async def upload(files: list[UploadFile] = File(...)):
-    sid = uuid.uuid4().hex
-    session_dir = UPLOADS_DIR / sid
-    session_dir.mkdir(parents=True, exist_ok=True)
+    return RetrieverQueryEngine.from_args(
+        retriever=retriever,
+        llm=llm,
+        node_postprocessors=[reranker],
+        response_mode="compact",
+        text_qa_template=template,
+    )
+
+# API routes
+@app.post("/upload", response_model=UploadResponse)
+async def upload_documents(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="no files provided")
     for f in files:
         if not f.filename.lower().endswith(".pdf"):
-            raise HTTPException(400, detail="Only PDF files are accepted")
-        (session_dir / f.filename).write_bytes(await f.read())
-    try:
-        SESSIONS[sid] = build_engine(session_dir)
-    except Exception as e:
-        raise HTTPException(500, detail=f"Failed to build index: {e}")
-    console.print(f"[green]✓  Session {sid} ready with {len(files)} PDF(s)[/]")
-    return {"session_id": sid}
+            raise HTTPException(status_code=400, detail=f"{f.filename} is not a PDF")
 
-@app.post("/ask/{sid}")
-async def ask(sid: str, body: Any = Body(...)):
-    engine = SESSIONS.get(sid)
-    if not engine:
-        raise HTTPException(404, detail="Invalid session_id")
-    q = body if isinstance(body, str) else body.get("question") or body.get("query")
-    if not q:
-        raise HTTPException(422, detail="Field 'question' missing")
-    try:
-        return {"content": engine.query(q).response}
-    except Exception as e:
-        console.print(f"[red]Query error: {e}[/]")
-        raise HTTPException(500, detail="Query failed")
+    session_id = str(uuid.uuid4())
+    index = _build_index([await f.read() for f in files], session_id)
 
-@app.get("/info")
-def info():
-    return {"active_sessions": len(SESSIONS), "ollama_model": os.getenv("OLLAMA_MODEL", "llama3.1:8b")}
+    sessions[session_id] = {
+        "index": index,
+        "created_at": time.time(),
+        "file_count": len(files),
+        "file_names": [f.filename for f in files],
+        "custom_prompt": None,
+    }
+    return UploadResponse(session_id=session_id, message="documents processed")
+
+
+@app.post("/ask/{session_id}", response_model=QuestionResponse)
+async def ask_question(session_id: str, request: QuestionRequest):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    data = sessions[session_id]
+    engine = _make_engine(data["index"], request.custom_prompt or data["custom_prompt"])
+    result = engine.query(request.question)
+    return QuestionResponse(content=str(result.response))
+
+
+@app.post("/sessions/{session_id}/prompt")
+async def set_prompt(session_id: str, req: UploadRequest):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    sessions[session_id]["custom_prompt"] = req.custom_prompt
+    return {"message": "prompt updated"}
+
+
+@app.get("/sessions/{session_id}")
+async def session_meta(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {**sessions[session_id], "session_id": session_id}
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="session not found")
+    collection = f"session_{session_id}"
+    try:
+        qdrant_client_instance.delete_collection(collection)  
+    except Exception as exc:
+        logger.error("Failed to delete collection %s: %s", session_id, exc)
+    sessions.pop(session_id, None)
+    return {"message": "session deleted"}
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "active_sessions": len(sessions),
+        "models_loaded": embed_model is not None and llm is not None,
+    }
