@@ -2,6 +2,12 @@
 
 DocQ-UI is a fast, open-source Q&A bot with UI that finds answers from your PDFs in seconds. Just upload your documents and ask questions, no more scrolling!
 
+
+
+https://github.com/user-attachments/assets/7915b9d9-79f4-48bc-bf57-9612ec067306
+
+
+
 ## Tech Stack
 
 ### Frontend
